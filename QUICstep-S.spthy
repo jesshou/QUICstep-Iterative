@@ -1,0 +1,36 @@
+theory QUICStep
+
+begin
+
+builtins: diffie-hellman, hashing, symmetric-encryption
+functions: h1/1
+
+let C() =
+    new dcid;
+    new ~eskC;
+    let pkC = 'g'^~eskC in
+    let initial_secret = h1(<'quic_initial_salt', dcid>) in
+    let client_initial_secret = h1(<initial_secret, 'client'>) in
+    let server_initial_secret = h1(<initial_secret, 'server'>) in
+    0
+
+let S() =
+    0
+
+process:
+  ( !C() | !S() )
+
+// lemma QUICstep:
+//   exists-trace
+//   "Ex #i #j #k #l #m #n #p.
+//      ClientHelloSent('vpn') @ #i &
+//      ServerHelloSent('vpn') @ #j &
+//      HandshakeFinishedFirst('vpn') @ #k &
+//      HandshakeFinishedConfirmed('vpn') @ #l &
+//      HandshakeConfirmationSent('quic') @ #m &
+//      QUICstepComplete('client') @ #n &
+//      QUICstepComplete('server') @ #p &
+//      #i < #j & #j < #k & #k < #l & #l < #m & #m < #n & #n < #p
+//   "
+
+end
