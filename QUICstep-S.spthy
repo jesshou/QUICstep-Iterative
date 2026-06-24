@@ -6,31 +6,86 @@ builtins: diffie-hellman, hashing, symmetric-encryption
 functions: h1/1
 
 let C() =
+    // setting up Initial Secret keys --------------------------------------------------------------------------------
+    // connection ID which is derived from the wire / packet header
     new dcid;
+
+    // Generate a new ephemeral secret key for the client (a part of TLS)
     new ~eskC;
     let pkC = 'g'^~eskC in
+
+    // initial secret calculated with the salt and connection ID
     let initial_secret = h1(<'quic_initial_salt', dcid>) in
+
+    // derive client and server initial secrets using publicly known values
     let client_initial_secret = h1(<initial_secret, 'client'>) in
     let server_initial_secret = h1(<initial_secret, 'server'>) in
+
+    // sends out connection ID to server
+    out(dcid);
+
+    // Sending ClientHello ---------------------------------------------------------------------------------
+    let clientHello = <pkC, 'empty'> in
+    event ClientHelloSent(clientHello);
+    out(clientHello);
+
+    // Receive ServerHello and derive TLS shared secret --------------------------------------------------
+    in(pkS);
+    let tlsSharedSecret = pkS^~eskC in
+    event ClientTlsSecretDerived(clientHello, tlsSharedSecret);
     0
 
 let S() =
+
+    // setting up Initial Secret keys --------------------------------------------------------------------------------
+    // receiving connection ID from the client
+    in(dcid);
+
+    // Generate a new ephemeral secret key for the server (a part of TLS)
+    new ~eskS;
+    let pkS = 'g'^~eskS in
+
+    // initial secret calculated with the salt and connection ID
+    let initial_secret = h1(<'quic_initial_salt', dcid>) in
+
+    // derive client and server initial secrets using publicly known values
+    let client_initial_secret = h1(<initial_secret, 'client'>) in
+    let server_initial_secret = h1(<initial_secret, 'server'>) in
+
+    // Receive ClientHello --------------------------------------------------------------------------------
+    in(clientHello);
+    let pkC = fst(clientHello) in
+    event ClientHelloReceived(clientHello);
+
+    // Send ServerHello and derive TLS shared secret -----------------------------------------------------
+    let tlsSharedSecret = pkC^~eskS in
+    event ServerTlsSecretDerived(clientHello, tlsSharedSecret);
+    out(pkS);
     0
 
 process:
   ( !C() | !S() )
 
-// lemma QUICstep:
-//   exists-trace
-//   "Ex #i #j #k #l #m #n #p.
-//      ClientHelloSent('vpn') @ #i &
-//      ServerHelloSent('vpn') @ #j &
-//      HandshakeFinishedFirst('vpn') @ #k &
-//      HandshakeFinishedConfirmed('vpn') @ #l &
-//      HandshakeConfirmationSent('quic') @ #m &
-//      QUICstepComplete('client') @ #n &
-//      QUICstepComplete('server') @ #p &
-//      #i < #j & #j < #k & #k < #l & #l < #m & #m < #n & #n < #p
-//   "
+// eskC is never revealed to the adversary
+lemma eskC_secret:
+  all-traces
+  "All eskC #i. Fr(eskC) @ #i ==> not (Ex #j. K(eskC) @ #j)"
+
+// client sends a ClientHello
+lemma client_sent_hello:
+  exists-trace
+  "Ex ch #i. ClientHelloSent(ch) @ #i"
+
+// server receives a ClientHello
+lemma server_received_hello:
+  exists-trace
+  "Ex ch #i. ClientHelloReceived(ch) @ #i"
+
+// executability: client and server derive the same secret for the same ClientHello
+lemma same_tls_shared_secret:
+  exists-trace
+  "Ex ch s #i #j.
+     ServerTlsSecretDerived(ch, s) @ #i &
+     ClientTlsSecretDerived(ch, s) @ #j"
 
 end
