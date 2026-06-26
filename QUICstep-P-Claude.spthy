@@ -26,5 +26,10 @@ let Client =
     out('VPN', encCH);
     ...
 
+let Server =
+    new sKs;                        (* sample random private key *)
+    let pKs = dh(sKs, 'g') in      (* compute X25519 public key: pKs = sKs * G *)
+    ...
+
 
 end
