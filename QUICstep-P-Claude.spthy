@@ -134,5 +134,17 @@ let Server =
     let c1rttk  = hkdf_expand(rtt_secret, 'client_1rtt')    in   (* client_1rtt_key *)
     let c1rttiv = hkdf_expand(rtt_secret, 'client_1rtt_iv') in   (* client_1rtt_IV  *)
     let c1rtthp = hkdf_expand(rtt_secret, 'client_1rtt_hp') in   (* client_1rtt_hpk *)
+    
+    (* --- Receive Client Handshake Confirmation + Ping packet --- *)
+    in('VPN', <dcid, encCHC, encCP>);
+    let ('ClientHsConfirm', =hmac(rtt_hash, chk)) = sdec(encCHC, chk) in
+    let ('ClientPing', =dcid)                      = sdec(encCP, c1rttk) in
+
+    (* --- Server Handshake Confirmation + Pong packet --- *)
+    let serverHsConfirm = ('ServerHsConfirm', hmac(rtt_hash, shk)) in
+    let serverPong      = ('ServerPong', dcid) in
+    let encSHC          = senc(serverHsConfirm, shk) in
+    let encSP           = senc(serverPong, s1rttk) in
+    out('VPN', <dcid, encSHC, encSP>);
     ...
 end
