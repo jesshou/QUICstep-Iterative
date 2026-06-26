@@ -24,12 +24,32 @@ let Client =
     let clientHello = ('ClientHello', pKc, dcid) in
     let encCH = senc(clientHello, cik) in
     out('VPN', encCH);
-    ...
+    
 
 let Server =
     new sKs;                        (* sample random private key *)
     let pKs = dh(sKs, 'g') in      (* compute X25519 public key: pKs = sKs * G *)
-    ...
 
+    (* --- Receive ClientHello: dcid in plaintext header, payload encrypted --- *)
+    in('VPN', <dcid, encCH>);
+    let salt = 'QUIC_INITIAL_SALT' in
+    let initial_secret = hkdf_extract(salt, dcid) in
+
+    let cik  = hkdf_expand(initial_secret, 'client_in') in
+    let sik  = hkdf_expand(initial_secret, 'server_in') in
+    let ciiv = hkdf_expand(initial_secret, 'client_iv') in
+    let siiv = hkdf_expand(initial_secret, 'server_iv') in
+    let cihp = hkdf_expand(initial_secret, 'client_hp') in
+    let sihp = hkdf_expand(initial_secret, 'server_hp') in
+
+    (* --- Decrypt payload with derived cik --- *)
+    let ('ClientHello', pKc) = sdec(encCH, cik) in
+    (* --- Server Initial + Handshake packet --- *)
+    let serverHello     = ('ServerHello', pKs, dcid) in
+    let serverHandshake = ('ServerHandshake', 'TLS_CERT') in
+    let serverPayload   = (serverHello, serverHandshake) in
+    let encSP           = senc(serverPayload, sik) in
+    out('VPN', <dcid, encSP>);
+    ...
 
 end
