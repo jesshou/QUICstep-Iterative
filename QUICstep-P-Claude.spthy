@@ -1,8 +1,8 @@
 theory QUICStep
 begin
 
-builtins: diffie-hellman, symmetric-encryption, hashing
-functions: hkdf_extract/2, hkdf_expand/2
+builtins: diffie-hellman, symmetric-encryption, hashing, signing
+functions: hkdf_extract/2, hkdf_expand/2, hmac/2
 
 let Client =
     new sKc;
@@ -50,7 +50,6 @@ let Server =
     let serverPayload   = (serverHello, serverHandshake) in
     let encSP           = senc(serverPayload, sik) in
     out('VPN', <dcid, encSP>);
-    ...
 
     (* --- Server Handshake Key Derivation --- *)
     let shared_secret = dh(sKs, pKc) in
@@ -63,6 +62,29 @@ let Server =
     let shk  = hkdf_expand(handshake_secret, 'server_hs') in   (* server_handshake_key *)
     let shiv = hkdf_expand(handshake_secret, 'server_iv') in   (* server_handshake_IV  *)
     let shhp = hkdf_expand(handshake_secret, 'server_hp') in   (* server_handshake_hpk *)
-    ...
+
+    (* --- Server Handshake Finished packet --- *)
+    let cert_verify         = sign('TLS_CERT', sKs) in
+    let hs_finished         = ('HandshakeFinished', hmac(handshake_hash, shk)) in
+    let serverHsFinished    = (cert_verify, hs_finished) in
+    let encSHF              = senc(serverHsFinished, shk) in
+    out('VPN', <dcid, encSHF>);
+    (* --- Receive Server Initial + Handshake packet --- *)
+    in('VPN', <dcid, encSP>);
+    let (serverHello, serverHandshake) = sdec(encSP, sik) in
+    let ('ServerHello', pKs, =dcid)    = serverHello in
+    let ('ServerHandshake', 'TLS_CERT') = serverHandshake in
+
+    (* --- Client Handshake Key Derivation --- *)
+    let shared_secret    = dh(sKc, pKs) in
+    let handshake_hash   = h((clientHello, serverHello)) in
+    let handshake_secret = hkdf_extract(shared_secret, handshake_hash) in
+
+    let chk  = hkdf_expand(handshake_secret, 'client_hs') in   (* client_handshake_key *)
+    let chiv = hkdf_expand(handshake_secret, 'client_iv') in   (* client_handshake_IV  *)
+    let chhp = hkdf_expand(handshake_secret, 'client_hp') in   (* client_handshake_hpk *)
+    let shk  = hkdf_expand(handshake_secret, 'server_hs') in   (* server_handshake_key *)
+    let shiv = hkdf_expand(handshake_secret, 'server_iv') in   (* server_handshake_IV  *)
+    let shhp = hkdf_expand(handshake_secret, 'server_hp') in   (* server_handshake_hpk *)
 
 end
