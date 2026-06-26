@@ -1,0 +1,130 @@
+theory QUICStep
+
+begin
+
+builtins: diffie-hellman, hashing, symmetric-encryption, signing
+functions: h1/1
+
+restriction Equality:
+  "All x y #i. Eq(x, y) @ #i ==> x = y"
+
+let C() =
+    // setting up Initial Secret keys --------------------------------------------------------------------------------
+    // connection ID which is derived from the wire / packet header
+    new dcid;
+
+    // Generate a new ephemeral secret key for the client (a part of TLS)
+    new ~eskC;
+    let pkC = 'g'^~eskC in
+
+    // initial secret calculated with the salt and connection ID
+    let initial_secret = h1(<'quic_initial_salt', dcid>) in
+
+    // derive client and server initial secrets using publicly known values
+    let client_initial_secret = h1(<initial_secret, 'client'>) in
+    let server_initial_secret = h1(<initial_secret, 'server'>) in
+
+    // sends out connection ID to server
+    out(dcid);
+
+    // Sending ClientHello ---------------------------------------------------------------------------------
+    let clientHello = <pkC, 'empty'> in
+    event ClientHelloSent(clientHello);
+    out(clientHello);
+
+    // Receive ServerHello flight ------------------------------------------------------------------------
+    in(pkDomain);
+    in(serverHelloPacket);
+    let serverHello = fst(serverHelloPacket) in
+    let encryptedServerHandshake = snd(serverHelloPacket) in
+    let pkS = fst(serverHello) in
+    let tlsSharedSecret = pkS^~eskC in
+    let tlsSharedSecretRecord = h1(<pkC, pkS>) in
+    let serverHandshake = sdec(encryptedServerHandshake, tlsSharedSecret) in
+    let serverEncryptedExtensions = fst(serverHandshake) in
+    let certificateVerify = fst(snd(serverHandshake)) in
+    let certificateVerifyTranscript = <clientHello, serverHello, serverEncryptedExtensions> in
+    event Eq(verify(certificateVerify, certificateVerifyTranscript, pkDomain), true);
+    event ClientTlsSecretDerived(clientHello, tlsSharedSecretRecord);
+    event ClientServerHelloReceived(clientHello, tlsSharedSecretRecord);
+    0
+
+let S() =
+
+    // setting up Initial Secret keys --------------------------------------------------------------------------------
+    // receiving connection ID from the client
+    in(dcid);
+
+    // Generate a new ephemeral secret key for the server (a part of TLS)
+    new ~eskS;
+    let pkS = 'g'^~eskS in
+
+    // Domain signing key for CertificateVerify (stub PKI)
+    new ~ltkS;
+    let pkDomain = pk(~ltkS) in
+    out(pkDomain);
+
+    // Server source connection ID (QUIC transport params stub)
+    new scid;
+
+    // initial secret calculated with the salt and connection ID
+    let initial_secret = h1(<'quic_initial_salt', dcid>) in
+
+    // derive client and server initial secrets using publicly known values
+    let client_initial_secret = h1(<initial_secret, 'client'>) in
+    let server_initial_secret = h1(<initial_secret, 'server'>) in
+
+    // Receive ClientHello --------------------------------------------------------------------------------
+    in(clientHello);
+    let pkC = fst(clientHello) in
+    event ClientHelloReceived(clientHello);
+
+    // Send ServerHello flight (matches postdoc ServerSendServerHello) -----------------------------------
+    let tlsSharedSecret = pkC^~eskS in
+    let tlsSharedSecretRecord = h1(<pkC, pkS>) in
+    let serverHello = <pkS> in
+    let serverEncryptedExtensions = <scid, dcid> in
+    let certificateVerifyTranscript = <clientHello, serverHello, serverEncryptedExtensions> in
+    let certificateVerify = sign(certificateVerifyTranscript, ~ltkS) in
+    let serverFinished = 'finished' in
+    let serverHandshake = <serverEncryptedExtensions, certificateVerify, serverFinished> in
+    let encryptedServerHandshake = senc(serverHandshake, tlsSharedSecret) in
+    let serverHelloPacket = <serverHello, encryptedServerHandshake> in
+    event ServerTlsSecretDerived(clientHello, tlsSharedSecretRecord);
+    event ServerHelloSent(clientHello, tlsSharedSecretRecord, pkS, certificateVerifyTranscript);
+    out(serverHelloPacket);
+    0
+
+process:
+  ( !C() | !S() )
+
+// eskC is never revealed to the adversary
+lemma eskC_secret:
+  all-traces
+  "All eskC #i. Fr(eskC) @ #i ==> not (Ex #j. K(eskC) @ #j)"
+
+lemma client_sent_hello:
+  exists-trace
+  "Ex ch #i. ClientHelloSent(ch) @ #i"
+
+lemma server_received_hello:
+  exists-trace
+  "Ex ch #i. ClientHelloReceived(ch) @ #i"
+
+lemma server_sent_hello:
+  exists-trace
+  "Ex ch s pk cv #i.
+     ServerHelloSent(ch, s, pk, cv) @ #i"
+
+lemma client_received_server_hello:
+  exists-trace
+  "Ex ch s #i. ClientServerHelloReceived(ch, s) @ #i"
+
+// TODO: agreement on ch needs session linking (see postdoc persistent facts)
+// lemma same_tls_shared_secret:
+//   exists-trace
+//   "Ex ch s pk cv #i #j.
+//      ServerHelloSent(ch, s, pk, cv) @ #i &
+//      ClientServerHelloReceived(ch, s) @ #j"
+
+end

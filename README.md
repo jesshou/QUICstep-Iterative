@@ -25,3 +25,7 @@ Interation 2 06/24/2026:
   - S receives ClientHello
   - S and C derive the same TLS shared secret
 - All lemmas successful
+
+Iteration 3 06/26/2026:
+
+- Included file "QUICstep-P-Claude": this is a consistency check between AutoSM with English language and Claude Sonnet 4.6

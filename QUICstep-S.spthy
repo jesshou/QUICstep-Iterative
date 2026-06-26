@@ -57,7 +57,7 @@ let S() =
     let pkC = fst(clientHello) in
     event ClientHelloReceived(clientHello);
 
-    // Send ServerHello and derive TLS shared secret -----------------------------------------------------
+    // derive TLS shared secret -----------------------------------------------------
     let tlsSharedSecret = pkC^~eskS in
     event ServerTlsSecretDerived(clientHello, tlsSharedSecret);
     out(pkS);
