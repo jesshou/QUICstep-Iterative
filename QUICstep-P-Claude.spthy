@@ -36,6 +36,17 @@ let Client =
     let clientAckPayload    = (clientInitialAck, clientHandshakeAck) in
     let encCAP              = senc(clientAckPayload, chk) in
     out('VPN', <dcid, encCAP>);
+    
+    (* --- Client 1-RTT Key Derivation --- *)
+    let rtt_hash   = h((clientHello, serverHello, serverHandshake, serverHsFinished)) in
+    let rtt_secret = hkdf_extract(shared_secret, rtt_hash) in
+
+    let s1rttk  = hkdf_expand(rtt_secret, 'server_1rtt')    in   (* server_1rtt_key *)
+    let s1rttiv = hkdf_expand(rtt_secret, 'server_1rtt_iv') in   (* server_1rtt_IV  *)
+    let s1rtthp = hkdf_expand(rtt_secret, 'server_1rtt_hp') in   (* server_1rtt_hpk *)
+    let c1rttk  = hkdf_expand(rtt_secret, 'client_1rtt')    in   (* client_1rtt_key *)
+    let c1rttiv = hkdf_expand(rtt_secret, 'client_1rtt_iv') in   (* client_1rtt_IV  *)
+    let c1rtthp = hkdf_expand(rtt_secret, 'client_1rtt_hp') in   (* client_1rtt_hpk *)
     ...
     
 
