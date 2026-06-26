@@ -54,6 +54,17 @@ let Client =
     let encCHC          = senc(clientHsConfirm, chk) in
     let encCP           = senc(clientPing, c1rttk) in
     out('VPN', <dcid, encCHC, encCP>);
+    
+    (* --- Receive Server Handshake Confirmation + Pong --- *)
+    in('VPN', <dcid, encSHC, encSP>);
+    let ('ServerHsConfirm', =hmac(rtt_hash, shk)) = sdec(encSHC, shk) in
+    let ('ServerPong', =dcid)                      = sdec(encSP, s1rttk) in
+
+    (* --- Connection Migration: transition from VPN to regular channel --- *)
+    new dcid2;                                              (* new connection ID post-migration *)
+    let dataAck     = ('DataAck', dcid, dcid2) in
+    let encDA       = senc(dataAck, c1rttk) in
+    out('regular', <dcid2, encDA>);
     ...
     
 
