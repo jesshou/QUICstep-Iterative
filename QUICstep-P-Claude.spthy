@@ -24,6 +24,19 @@ let Client =
     let clientHello = ('ClientHello', pKc, dcid) in
     let encCH = senc(clientHello, cik) in
     out('VPN', encCH);
+
+    (* --- Receive Server Handshake Finished packet --- *)
+    in('VPN', <dcid, encSHF>);
+    let (cert_verify, hs_finished)          = sdec(encSHF, shk) in
+    let ('HandshakeFinished', =hmac(handshake_hash, shk)) = hs_finished in
+
+    (* --- Client Initial ACK + Handshake ACK packet --- *)
+    let clientInitialAck    = ('ClientInitialAck', dcid) in
+    let clientHandshakeAck  = ('ClientHandshakeAck', hmac(handshake_hash, chk)) in
+    let clientAckPayload    = (clientInitialAck, clientHandshakeAck) in
+    let encCAP              = senc(clientAckPayload, chk) in
+    out('VPN', <dcid, encCAP>);
+    ...
     
 
 let Server =
@@ -87,4 +100,21 @@ let Server =
     let shiv = hkdf_expand(handshake_secret, 'server_iv') in   (* server_handshake_IV  *)
     let shhp = hkdf_expand(handshake_secret, 'server_hp') in   (* server_handshake_hpk *)
 
+    (* --- Receive Client ACK packet --- *)
+    in('VPN', <dcid, encCAP>);
+    let (clientInitialAck, clientHandshakeAck)           = sdec(encCAP, chk) in
+    let ('ClientInitialAck', =dcid)                      = clientInitialAck in
+    let ('ClientHandshakeAck', =hmac(handshake_hash, chk)) = clientHandshakeAck in
+
+    (* --- Server 1-RTT Key Derivation --- *)
+    let rtt_hash   = h((clientHello, serverHello, serverHandshake, serverHsFinished)) in
+    let rtt_secret = hkdf_extract(shared_secret, rtt_hash) in
+
+    let s1rttk  = hkdf_expand(rtt_secret, 'server_1rtt')    in   (* server_1rtt_key *)
+    let s1rttiv = hkdf_expand(rtt_secret, 'server_1rtt_iv') in   (* server_1rtt_IV  *)
+    let s1rtthp = hkdf_expand(rtt_secret, 'server_1rtt_hp') in   (* server_1rtt_hpk *)
+    let c1rttk  = hkdf_expand(rtt_secret, 'client_1rtt')    in   (* client_1rtt_key *)
+    let c1rttiv = hkdf_expand(rtt_secret, 'client_1rtt_iv') in   (* client_1rtt_IV  *)
+    let c1rtthp = hkdf_expand(rtt_secret, 'client_1rtt_hp') in   (* client_1rtt_hpk *)
+    ...
 end
