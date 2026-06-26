@@ -157,5 +157,14 @@ let Server =
     let encSHC          = senc(serverHsConfirm, shk) in
     let encSP           = senc(serverPong, s1rttk) in
     out('VPN', <dcid, encSHC, encSP>);
+    
+    (* --- Receive Client DataAck on regular channel --- *)
+    in('regular', <dcid2, encDA>);
+    let ('DataAck', =dcid, dcid2) = sdec(encDA, c1rttk) in
+
+    (* --- Server Close Connection --- *)
+    let serverClose = ('ServerClose', dcid, dcid2) in
+    let encSC       = senc(serverClose, c1rttk) in
+    out('regular', <dcid2, encSC>);
     ...
 end
