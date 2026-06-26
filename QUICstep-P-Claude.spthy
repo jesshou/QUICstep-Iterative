@@ -1,6 +1,25 @@
+theory QUICStep
+begin
 
+builtins: diffie-hellman
+functions: hkdf_extract/2, hkdf_expand/2
 
 let Client =
     new sKc;                        (* sample random private key *)
     let pKc = dh(sKc, 'g') in      (* compute X25519 public key: pKc = sKc * G *)
+
+    (* --- Initial key derivation --- *)
+    new dcid;                                    (* 8 bytes of random connection ID *)
+    let salt = 'QUIC_INITIAL_SALT' in            (* represents 0x38762cf7f55934b34d179ae6a4c80cadccbb7f0a *)
+    let initial_secret = hkdf_extract(salt, dcid) in
+
+    let cik  = hkdf_expand(initial_secret, 'client_in') in   (* client_initial_key *)
+    let sik  = hkdf_expand(initial_secret, 'server_in') in   (* server_initial_key *)
+    let ciiv = hkdf_expand(initial_secret, 'client_iv') in   (* client_initial_IV  *)
+    let siiv = hkdf_expand(initial_secret, 'server_iv') in   (* server_initial_IV  *)
+    let cihp = hkdf_expand(initial_secret, 'client_hp') in   (* client_initial_hpk *)
+    let sihp = hkdf_expand(initial_secret, 'server_hp') in   (* server_initial_hpk *)
     ...
+
+
+end
