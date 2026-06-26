@@ -47,6 +47,13 @@ let Client =
     let c1rttk  = hkdf_expand(rtt_secret, 'client_1rtt')    in   (* client_1rtt_key *)
     let c1rttiv = hkdf_expand(rtt_secret, 'client_1rtt_iv') in   (* client_1rtt_IV  *)
     let c1rtthp = hkdf_expand(rtt_secret, 'client_1rtt_hp') in   (* client_1rtt_hpk *)
+    
+    (* --- Client Handshake Confirmation + Ping packet --- *)
+    let clientHsConfirm = ('ClientHsConfirm', hmac(rtt_hash, chk)) in
+    let clientPing      = ('ClientPing', dcid) in
+    let encCHC          = senc(clientHsConfirm, chk) in
+    let encCP           = senc(clientPing, c1rttk) in
+    out('VPN', <dcid, encCHC, encCP>);
     ...
     
 
