@@ -1,7 +1,7 @@
 theory QUICStep
 begin
 
-builtins: diffie-hellman
+builtins: diffie-hellman, symmetric-encryption, hashing
 functions: hkdf_extract/2, hkdf_expand/2
 
 let Client =
@@ -50,6 +50,19 @@ let Server =
     let serverPayload   = (serverHello, serverHandshake) in
     let encSP           = senc(serverPayload, sik) in
     out('VPN', <dcid, encSP>);
+    ...
+
+    (* --- Server Handshake Key Derivation --- *)
+    let shared_secret = dh(sKs, pKc) in
+    let handshake_hash = h((clientHello, serverHello)) in
+    let handshake_secret = hkdf_extract(shared_secret, handshake_hash) in
+
+    let chk  = hkdf_expand(handshake_secret, 'client_hs') in   (* client_handshake_key *)
+    let chiv = hkdf_expand(handshake_secret, 'client_iv') in   (* client_handshake_IV  *)
+    let chhp = hkdf_expand(handshake_secret, 'client_hp') in   (* client_handshake_hpk *)
+    let shk  = hkdf_expand(handshake_secret, 'server_hs') in   (* server_handshake_key *)
+    let shiv = hkdf_expand(handshake_secret, 'server_iv') in   (* server_handshake_IV  *)
+    let shhp = hkdf_expand(handshake_secret, 'server_hp') in   (* server_handshake_hpk *)
     ...
 
 end
