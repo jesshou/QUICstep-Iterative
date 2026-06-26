@@ -5,20 +5,25 @@ builtins: diffie-hellman
 functions: hkdf_extract/2, hkdf_expand/2
 
 let Client =
-    new sKc;                        (* sample random private key *)
-    let pKc = dh(sKc, 'g') in      (* compute X25519 public key: pKc = sKc * G *)
+    new sKc;
+    let pKc = dh(sKc, 'g') in
 
     (* --- Initial key derivation --- *)
-    new dcid;                                    (* 8 bytes of random connection ID *)
-    let salt = 'QUIC_INITIAL_SALT' in            (* represents 0x38762cf7f55934b34d179ae6a4c80cadccbb7f0a *)
+    new dcid;
+    let salt = 'QUIC_INITIAL_SALT' in
     let initial_secret = hkdf_extract(salt, dcid) in
 
-    let cik  = hkdf_expand(initial_secret, 'client_in') in   (* client_initial_key *)
-    let sik  = hkdf_expand(initial_secret, 'server_in') in   (* server_initial_key *)
-    let ciiv = hkdf_expand(initial_secret, 'client_iv') in   (* client_initial_IV  *)
-    let siiv = hkdf_expand(initial_secret, 'server_iv') in   (* server_initial_IV  *)
-    let cihp = hkdf_expand(initial_secret, 'client_hp') in   (* client_initial_hpk *)
-    let sihp = hkdf_expand(initial_secret, 'server_hp') in   (* server_initial_hpk *)
+    let cik  = hkdf_expand(initial_secret, 'client_in') in
+    let sik  = hkdf_expand(initial_secret, 'server_in') in
+    let ciiv = hkdf_expand(initial_secret, 'client_iv') in
+    let siiv = hkdf_expand(initial_secret, 'server_iv') in
+    let cihp = hkdf_expand(initial_secret, 'client_hp') in
+    let sihp = hkdf_expand(initial_secret, 'server_hp') in
+
+    (* --- Initial ClientHello --- *)
+    let clientHello = ('ClientHello', pKc, dcid) in
+    let encCH = senc(clientHello, cik) in
+    out('VPN', encCH);
     ...
 
 
