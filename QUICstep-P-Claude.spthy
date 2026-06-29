@@ -1,170 +1,77 @@
-theory QUICStep
+theory QUICstep_ClientInit
 begin
 
-builtins: diffie-hellman, symmetric-encryption, hashing, signing
-functions: hkdf_extract/2, hkdf_expand/2, hmac/2
+builtins: diffie-hellman, symmetric-encryption, hashing
 
-let Client =
-    new sKc;
-    let pKc = dh(sKc, 'g') in
+functions:
+    /* Key derivation */
+    HKDF_Extract/2,
+    HKDF_Expand/3,
+    initial_secret/2,
+    client_initial_key/1,
+    server_initial_key/1,
+    /* Connection ID */
+    gen_cid/1
 
-    (* --- Initial key derivation --- *)
-    new dcid;
-    let salt = 'QUIC_INITIAL_SALT' in
-    let initial_secret = hkdf_extract(salt, dcid) in
+/* ─────────────────────────────────────────────
+   PROCESS: Client Initialization
+   Generates:
+     - (skC, pkC)          asymmetric keypair
+     - DCID                Destination Connection ID
+     - client_initial_key  AEAD key for client Initial packets
+     - server_initial_key  AEAD key for server Initial packets
+   ───────────────────────────────────────────── */
+let ClientInit =
+    /* 1. Generate client long-term DH keypair */
+    new skC;
+    let pkC = 'g'^skC in
 
-    let cik  = hkdf_expand(initial_secret, 'client_in') in
-    let sik  = hkdf_expand(initial_secret, 'server_in') in
-    let ciiv = hkdf_expand(initial_secret, 'client_iv') in
-    let siiv = hkdf_expand(initial_secret, 'server_iv') in
-    let cihp = hkdf_expand(initial_secret, 'client_hp') in
-    let sihp = hkdf_expand(initial_secret, 'server_hp') in
+    /* 2. Generate Destination Connection ID (DCID)
+          RFC 9000 §7.2: chosen by client, at least 8 bytes of randomness */
+    new dcid_rand;
+    let DCID = gen_cid(dcid_rand) in
 
-    (* --- Initial ClientHello --- *)
-    let clientHello = ('ClientHello', pKc, dcid) in
-    let encCH = senc(clientHello, cik) in
-    out('VPN', encCH);
+    /* 3. Derive the QUIC Initial secret
+          initial_secret = HKDF-Extract(QUIC_VERSION_SALT, DCID)
+          (salt is a well-known constant per QUIC version) */
+    let version_salt = 'quic_v1_salt' in          /* public constant */
+    let init_secret  = HKDF_Extract(version_salt, DCID) in
 
-    (* --- Receive Server Handshake Finished packet --- *)
-    in('VPN', <dcid, encSHF>);
-    let (cert_verify, hs_finished)          = sdec(encSHF, shk) in
-    let ('HandshakeFinished', =hmac(handshake_hash, shk)) = hs_finished in
+    /* 4. Derive per-direction Initial keys
+          client key = HKDF-Expand(init_secret, "client in", key_len)
+          server key = HKDF-Expand(init_secret, "server in", key_len) */
+    let ck = client_initial_key(
+                 HKDF_Expand(init_secret, 'client_in', '16')) in
+    let sk = server_initial_key(
+                 HKDF_Expand(init_secret, 'server_in', '16')) in
 
-    (* --- Client Initial ACK + Handshake ACK packet --- *)
-    let clientInitialAck    = ('ClientInitialAck', dcid) in
-    let clientHandshakeAck  = ('ClientHandshakeAck', hmac(handshake_hash, chk)) in
-    let clientAckPayload    = (clientInitialAck, clientHandshakeAck) in
-    let encCAP              = senc(clientAckPayload, chk) in
-    out('VPN', <dcid, encCAP>);
-    
-    (* --- Client 1-RTT Key Derivation --- *)
-    let rtt_hash   = h((clientHello, serverHello, serverHandshake, serverHsFinished)) in
-    let rtt_secret = hkdf_extract(shared_secret, rtt_hash) in
+    /* 5. Publish the client's public key (sent in ClientHello) */
+    out(pkC);
 
-    let s1rttk  = hkdf_expand(rtt_secret, 'server_1rtt')    in   (* server_1rtt_key *)
-    let s1rttiv = hkdf_expand(rtt_secret, 'server_1rtt_iv') in   (* server_1rtt_IV  *)
-    let s1rtthp = hkdf_expand(rtt_secret, 'server_1rtt_hp') in   (* server_1rtt_hpk *)
-    let c1rttk  = hkdf_expand(rtt_secret, 'client_1rtt')    in   (* client_1rtt_key *)
-    let c1rttiv = hkdf_expand(rtt_secret, 'client_1rtt_iv') in   (* client_1rtt_IV  *)
-    let c1rtthp = hkdf_expand(rtt_secret, 'client_1rtt_hp') in   (* client_1rtt_hpk *)
-    
-    (* --- Client Handshake Confirmation + Ping packet --- *)
-    let clientHsConfirm = ('ClientHsConfirm', hmac(rtt_hash, chk)) in
-    let clientPing      = ('ClientPing', dcid) in
-    let encCHC          = senc(clientHsConfirm, chk) in
-    let encCP           = senc(clientPing, c1rttk) in
-    out('VPN', <dcid, encCHC, encCP>);
-    
-    (* --- Receive Server Handshake Confirmation + Pong --- *)
-    in('VPN', <dcid, encSHC, encSP>);
-    let ('ServerHsConfirm', =hmac(rtt_hash, shk)) = sdec(encSHC, shk) in
-    let ('ServerPong', =dcid)                      = sdec(encSP, s1rttk) in
+    /* 6. Record the established state for downstream processes
+          (DCID is sent in the clear in Initial packets;
+           Initial keys are known to the adversary per RFC 9001 §5.2) */
+    out(DCID);
 
-    (* --- Connection Migration: transition from VPN to regular channel --- *)
-    new dcid2;                                              (* new connection ID post-migration *)
-    let dataAck     = ('DataAck', dcid, dcid2) in
-    let encDA       = senc(dataAck, c1rttk) in
-    out('regular', <dcid2, encDA>);
-    ...
-    
+    /* Derived Initial keys are intentionally NOT published —
+       they are passed internally to the handshake process.
+       (Tamarin models this via state facts below.)              */
 
-let Server =
-    new sKs;                        (* sample random private key *)
-    let pKs = dh(sKs, 'g') in      (* compute X25519 public key: pKs = sKs * G *)
+    event ClientInitDone(pkC, DCID, ck, sk);
 
-    (* --- Receive ClientHello: dcid in plaintext header, payload encrypted --- *)
-    in('VPN', <dcid, encCH>);
-    let salt = 'QUIC_INITIAL_SALT' in
-    let initial_secret = hkdf_extract(salt, dcid) in
+    /* Pass state to the handshake process */
+    insert <'ClientState', pkC>,
+           <skC, DCID, ck, sk>
 
-    let cik  = hkdf_expand(initial_secret, 'client_in') in
-    let sik  = hkdf_expand(initial_secret, 'server_in') in
-    let ciiv = hkdf_expand(initial_secret, 'client_iv') in
-    let siiv = hkdf_expand(initial_secret, 'server_iv') in
-    let cihp = hkdf_expand(initial_secret, 'client_hp') in
-    let sihp = hkdf_expand(initial_secret, 'server_hp') in
+/* ─────────────────────────────────────────────
+   MAIN PROCESS
+   ───────────────────────────────────────────── */
+process:
+    !ClientInit
+  
+/* Master witness — all four outputs were produced in one run */
+lemma client_init_done:
+exists-trace
+  "Ex pkC dcid ck sk #i. ClientInitDone(pkC, dcid, ck, sk) @ #i"
 
-    (* --- Decrypt payload with derived cik --- *)
-    let ('ClientHello', pKc) = sdec(encCH, cik) in
-    (* --- Server Initial + Handshake packet --- *)
-    let serverHello     = ('ServerHello', pKs, dcid) in
-    let serverHandshake = ('ServerHandshake', 'TLS_CERT') in
-    let serverPayload   = (serverHello, serverHandshake) in
-    let encSP           = senc(serverPayload, sik) in
-    out('VPN', <dcid, encSP>);
-
-    (* --- Server Handshake Key Derivation --- *)
-    let shared_secret = dh(sKs, pKc) in
-    let handshake_hash = h((clientHello, serverHello)) in
-    let handshake_secret = hkdf_extract(shared_secret, handshake_hash) in
-
-    let chk  = hkdf_expand(handshake_secret, 'client_hs') in   (* client_handshake_key *)
-    let chiv = hkdf_expand(handshake_secret, 'client_iv') in   (* client_handshake_IV  *)
-    let chhp = hkdf_expand(handshake_secret, 'client_hp') in   (* client_handshake_hpk *)
-    let shk  = hkdf_expand(handshake_secret, 'server_hs') in   (* server_handshake_key *)
-    let shiv = hkdf_expand(handshake_secret, 'server_iv') in   (* server_handshake_IV  *)
-    let shhp = hkdf_expand(handshake_secret, 'server_hp') in   (* server_handshake_hpk *)
-
-    (* --- Server Handshake Finished packet --- *)
-    let cert_verify         = sign('TLS_CERT', sKs) in
-    let hs_finished         = ('HandshakeFinished', hmac(handshake_hash, shk)) in
-    let serverHsFinished    = (cert_verify, hs_finished) in
-    let encSHF              = senc(serverHsFinished, shk) in
-    out('VPN', <dcid, encSHF>);
-    (* --- Receive Server Initial + Handshake packet --- *)
-    in('VPN', <dcid, encSP>);
-    let (serverHello, serverHandshake) = sdec(encSP, sik) in
-    let ('ServerHello', pKs, =dcid)    = serverHello in
-    let ('ServerHandshake', 'TLS_CERT') = serverHandshake in
-
-    (* --- Client Handshake Key Derivation --- *)
-    let shared_secret    = dh(sKc, pKs) in
-    let handshake_hash   = h((clientHello, serverHello)) in
-    let handshake_secret = hkdf_extract(shared_secret, handshake_hash) in
-
-    let chk  = hkdf_expand(handshake_secret, 'client_hs') in   (* client_handshake_key *)
-    let chiv = hkdf_expand(handshake_secret, 'client_iv') in   (* client_handshake_IV  *)
-    let chhp = hkdf_expand(handshake_secret, 'client_hp') in   (* client_handshake_hpk *)
-    let shk  = hkdf_expand(handshake_secret, 'server_hs') in   (* server_handshake_key *)
-    let shiv = hkdf_expand(handshake_secret, 'server_iv') in   (* server_handshake_IV  *)
-    let shhp = hkdf_expand(handshake_secret, 'server_hp') in   (* server_handshake_hpk *)
-
-    (* --- Receive Client ACK packet --- *)
-    in('VPN', <dcid, encCAP>);
-    let (clientInitialAck, clientHandshakeAck)           = sdec(encCAP, chk) in
-    let ('ClientInitialAck', =dcid)                      = clientInitialAck in
-    let ('ClientHandshakeAck', =hmac(handshake_hash, chk)) = clientHandshakeAck in
-
-    (* --- Server 1-RTT Key Derivation --- *)
-    let rtt_hash   = h((clientHello, serverHello, serverHandshake, serverHsFinished)) in
-    let rtt_secret = hkdf_extract(shared_secret, rtt_hash) in
-
-    let s1rttk  = hkdf_expand(rtt_secret, 'server_1rtt')    in   (* server_1rtt_key *)
-    let s1rttiv = hkdf_expand(rtt_secret, 'server_1rtt_iv') in   (* server_1rtt_IV  *)
-    let s1rtthp = hkdf_expand(rtt_secret, 'server_1rtt_hp') in   (* server_1rtt_hpk *)
-    let c1rttk  = hkdf_expand(rtt_secret, 'client_1rtt')    in   (* client_1rtt_key *)
-    let c1rttiv = hkdf_expand(rtt_secret, 'client_1rtt_iv') in   (* client_1rtt_IV  *)
-    let c1rtthp = hkdf_expand(rtt_secret, 'client_1rtt_hp') in   (* client_1rtt_hpk *)
-    
-    (* --- Receive Client Handshake Confirmation + Ping packet --- *)
-    in('VPN', <dcid, encCHC, encCP>);
-    let ('ClientHsConfirm', =hmac(rtt_hash, chk)) = sdec(encCHC, chk) in
-    let ('ClientPing', =dcid)                      = sdec(encCP, c1rttk) in
-
-    (* --- Server Handshake Confirmation + Pong packet --- *)
-    let serverHsConfirm = ('ServerHsConfirm', hmac(rtt_hash, shk)) in
-    let serverPong      = ('ServerPong', dcid) in
-    let encSHC          = senc(serverHsConfirm, shk) in
-    let encSP           = senc(serverPong, s1rttk) in
-    out('VPN', <dcid, encSHC, encSP>);
-    
-    (* --- Receive Client DataAck on regular channel --- *)
-    in('regular', <dcid2, encDA>);
-    let ('DataAck', =dcid, dcid2) = sdec(encDA, c1rttk) in
-
-    (* --- Server Close Connection --- *)
-    let serverClose = ('ServerClose', dcid, dcid2) in
-    let encSC       = senc(serverClose, c1rttk) in
-    out('regular', <dcid2, encSC>);
-    ...
 end

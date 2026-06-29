@@ -29,3 +29,7 @@ Interation 2 06/24/2026:
 Iteration 3 06/26/2026:
 
 - Included file "QUICstep-P-Claude": this is a consistency check between AutoSM with English language and Claude Sonnet 4.6
+
+Iteration 17 06/29/2026:
+
+- starting from exchanging public keys and writing lemma to make sure they are similar
